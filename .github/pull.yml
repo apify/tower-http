@@ -1,0 +1,12 @@
+version: "1"
+rules:
+  - base: main
+    upstream: tower-rs/tower-http:main
+    mergeMethod: rebase
+    mergeUnstable: false
+    assignees:
+      - barjin
+    reviewers:
+      - barjin
+    conflictReviewers:
+      - barjin
