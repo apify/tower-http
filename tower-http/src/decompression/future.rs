@@ -67,8 +67,8 @@ where
                     }
                 };
 
-                entry.remove();
-                parts.headers.remove(header::CONTENT_LENGTH);
+                // entry.remove();
+                // parts.headers.remove(header::CONTENT_LENGTH);
 
                 Response::from_parts(parts, body)
             } else {
