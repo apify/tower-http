@@ -1,7 +1,7 @@
 version: "1"
 rules:
-  - mergeMethod: rebase
-    mergeUnstable: false
+  - base: main
+    upstream: tower-rs:main
     assignees:
       - barjin
     reviewers:
