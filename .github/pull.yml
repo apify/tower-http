@@ -1,8 +1,6 @@
 version: "1"
 rules:
-  - base: main
-    upstream: tower-rs/tower-http:main
-    mergeMethod: rebase
+  - mergeMethod: rebase
     mergeUnstable: false
     assignees:
       - barjin
