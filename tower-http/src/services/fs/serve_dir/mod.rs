@@ -76,6 +76,7 @@ impl ServeDir<DefaultServeDirFallback> {
             precompressed_variants: None,
             variant: ServeVariant::Directory {
                 append_index_html_on_directories: true,
+                html_as_default_extension: false,
             },
             fallback: None,
             call_fallback_on_method_not_allowed: false,
@@ -107,8 +108,25 @@ impl<F> ServeDir<F> {
         match &mut self.variant {
             ServeVariant::Directory {
                 append_index_html_on_directories,
+                ..
             } => {
                 *append_index_html_on_directories = append;
+                self
+            }
+            ServeVariant::SingleFile { mime: _ } => self,
+        }
+    }
+
+    /// If the requested path doesn't specify a file extension, append `.html`.
+    ///
+    /// Defaults to `false`.
+    pub fn html_as_default_extension(mut self, append: bool) -> Self {
+        match &mut self.variant {
+            ServeVariant::Directory {
+                html_as_default_extension,
+                ..
+            } => {
+                *html_as_default_extension = append;
                 self
             }
             ServeVariant::SingleFile { mime: _ } => self,
@@ -366,6 +384,7 @@ impl<F> ServeDir<F> {
             .and_then(|value| value.to_str().ok())
             .map(|s| s.to_owned());
 
+        let precompression_configured = self.precompressed_variants.is_some();
         let negotiated_encodings: Vec<_> = encodings(
             req.headers(),
             self.precompressed_variants.unwrap_or_default(),
@@ -381,6 +400,7 @@ impl<F> ServeDir<F> {
             negotiated_encodings,
             range_header,
             buf_chunk_size,
+            precompression_configured,
         ));
 
         ResponseFuture::open_file_future(open_file_future, fallback_and_request)
@@ -415,7 +435,7 @@ where
                     #[cfg(feature = "tracing")]
                     tracing::error!(error = %_err, "Failed to read file");
 
-                    let body = ResponseBody::new(UnsyncBoxBody::new(
+                    let body = ResponseBody::new(UnsyncBoxBody::from_inner(
                         Empty::new().map_err(|err| match err {}).boxed_unsync(),
                     ));
                     Response::builder()
@@ -445,6 +465,7 @@ opaque_future! {
 enum ServeVariant {
     Directory {
         append_index_html_on_directories: bool,
+        html_as_default_extension: bool,
     },
     SingleFile {
         mime: HeaderValue,
@@ -456,6 +477,7 @@ impl ServeVariant {
         match self {
             ServeVariant::Directory {
                 append_index_html_on_directories: _,
+                html_as_default_extension: _,
             } => {
                 let path = requested_path.trim_start_matches('/');
 
@@ -611,6 +633,12 @@ opaque_body! {
     /// Response body for [`ServeDir`] and [`ServeFile`][super::ServeFile].
     #[derive(Default)]
     pub type ResponseBody = UnsyncBoxBody<Bytes, io::Error>;
+}
+
+impl From<ResponseBody> for UnsyncBoxBody<Bytes, io::Error> {
+    fn from(body: ResponseBody) -> Self {
+        body.inner
+    }
 }
 
 /// The default fallback service used with [`ServeDir`].

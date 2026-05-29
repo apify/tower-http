@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # Unreleased
 
+## Fixed
+
+- `fs`: `ServeDir` and `ServeFile` now emit a `Vary: Accept-Encoding` response
+  header when precompressed serving is configured, ensuring caches correctly
+  distinguish between compressed and uncompressed variants.
+
 ## Changed
 
 - `trace`: `DefaultOnRequest`, `DefaultOnResponse`, `DefaultOnFailure`, and
@@ -23,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [#628]: https://github.com/tower-rs/tower-http/pull/628
 [#642]: https://github.com/tower-rs/tower-http/pull/642
+
+## Added
+
+- `body`: `UnsyncBoxBody::new()` constructor and `From<ServeFileSystemResponseBody>` conversion to avoid double-boxing when combining `ServeDir` responses with other body types ([#537])
 
 # 0.6.11
 

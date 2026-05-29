@@ -1101,6 +1101,7 @@ fn test_build_and_validate_path_reserved_dos_names() {
 
     let variant = ServeVariant::Directory {
         append_index_html_on_directories: true,
+        html_as_default_extension: false,
     };
     let base = Path::new("/base");
 
@@ -1145,4 +1146,151 @@ async fn identity_encoding_does_not_strip_extension_head_request() {
     let res = svc.oneshot(req).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn precompressed_response_includes_vary_header() {
+    let svc = ServeDir::new(TEST_FILES_DIR).precompressed_gzip();
+
+    let req = Request::builder()
+        .uri("/precompressed.txt")
+        .header("Accept-Encoding", "gzip")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(res.headers()["content-encoding"], "gzip");
+    assert_eq!(res.headers()["vary"], "accept-encoding");
+}
+
+#[tokio::test]
+async fn no_vary_header_without_precompressed_serving() {
+    let svc = ServeDir::new(REPO_ROOT);
+
+    let req = Request::builder()
+        .uri("/README.md")
+        .header("Accept-Encoding", "gzip")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res.headers().get("vary").is_none());
+}
+
+#[tokio::test]
+async fn vary_header_present_when_precompressed_configured_but_fallback_to_uncompressed() {
+    let svc = ServeDir::new(TEST_FILES_DIR).precompressed_gzip();
+
+    let req = Request::builder()
+        .uri("/precompressed.txt")
+        .header("Accept-Encoding", "br")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert!(res.headers().get("content-encoding").is_none());
+    assert_eq!(res.headers()["vary"], "accept-encoding");
+}
+
+#[tokio::test]
+async fn vary_header_present_when_precompressed_configured_but_no_accept_encoding() {
+    let svc = ServeDir::new(TEST_FILES_DIR).precompressed_gzip();
+
+    let req = Request::builder()
+        .uri("/precompressed.txt")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert!(res.headers().get("content-encoding").is_none());
+    assert_eq!(res.headers()["vary"], "accept-encoding");
+}
+
+#[tokio::test]
+async fn precompressed_head_request_includes_vary_header() {
+    let svc = ServeDir::new(TEST_FILES_DIR).precompressed_gzip();
+
+    let req = Request::builder()
+        .uri("/precompressed.txt")
+        .method(Method::HEAD)
+        .header("Accept-Encoding", "gzip")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(res.headers()["content-encoding"], "gzip");
+    assert_eq!(res.headers()["vary"], "accept-encoding");
+}
+
+#[tokio::test]
+async fn unsync_box_body_new() {
+    use crate::body::UnsyncBoxBody;
+    use http_body_util::Full;
+
+    let body: UnsyncBoxBody<Bytes, Infallible> =
+        UnsyncBoxBody::new(Full::new(Bytes::from("hello")));
+    let collected = body.collect().await.unwrap().to_bytes();
+    assert_eq!(collected, "hello");
+}
+
+#[tokio::test]
+async fn response_body_into_unsync_box_body() {
+    use crate::body::UnsyncBoxBody;
+
+    let svc = ServeDir::new("..");
+    let req = Request::builder()
+        .uri("/README.md")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    // Convert the ServeDir response body into UnsyncBoxBody without double-boxing
+    let boxed: UnsyncBoxBody<Bytes, std::io::Error> = res.into_body().into();
+    let collected = boxed.collect().await.unwrap().to_bytes();
+
+    let expected = std::fs::read_to_string("../README.md").unwrap();
+    assert_eq!(collected, expected);
+}
+
+#[tokio::test]
+async fn html_as_default_extension() {
+    let svc = ServeDir::new(TEST_FILES_DIR).html_as_default_extension(true);
+
+    let req = Request::builder().uri("/page").body(Body::empty()).unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["content-type"], "text/html");
+
+    let body = body_into_text(res.into_body()).await;
+    assert_eq!(body, "<b>page</b>\n");
+}
+
+#[tokio::test]
+async fn html_as_default_extension_not_found() {
+    let svc = ServeDir::new(TEST_FILES_DIR).html_as_default_extension(true);
+
+    let req = Request::builder()
+        .uri("/nonexistent")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn html_as_default_extension_does_not_apply_when_extension_present() {
+    let svc = ServeDir::new(TEST_FILES_DIR).html_as_default_extension(true);
+
+    // Request a file that exists with its extension; should serve normally
+    let req = Request::builder()
+        .uri("/precompressed.txt")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["content-type"], "text/plain");
 }
