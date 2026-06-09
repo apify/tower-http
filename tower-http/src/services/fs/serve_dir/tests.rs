@@ -448,6 +448,48 @@ async fn redirect_to_trailing_slash_on_dir() {
 }
 
 #[tokio::test]
+async fn redirect_to_trailing_slash_with_redirect_path_prefix() {
+    let cases = [
+        ("/foo", "/src", "/foo/src/"),
+        ("/foo/", "/src", "/foo//src/"),
+        ("", "/src", "/src/"),
+        ("/foo", "/src?key=value", "/foo/src/?key=value"),
+        ("/foo", "/s%72c", "/foo/s%72c/"),
+    ];
+
+    for (prefix, uri, expected_location) in cases {
+        let svc = ServeDir::new(".").redirect_path_prefix(prefix);
+
+        let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+        let res = svc.oneshot(req).await.unwrap();
+
+        assert_eq!(res.status(), StatusCode::TEMPORARY_REDIRECT);
+
+        let location = &res.headers()[http::header::LOCATION];
+        assert_eq!(location, expected_location);
+    }
+}
+
+#[tokio::test]
+async fn redirect_path_prefix_preserved_through_fallback() {
+    async fn fallback<B>(_: Request<B>) -> Result<Response<Body>, Infallible> {
+        Ok(Response::new(Body::empty()))
+    }
+
+    let svc = ServeDir::new(".")
+        .redirect_path_prefix("/foo")
+        .fallback(tower::service_fn(fallback));
+
+    let req = Request::builder().uri("/src").body(Body::empty()).unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(res.status(), StatusCode::TEMPORARY_REDIRECT);
+
+    let location = &res.headers()[http::header::LOCATION];
+    assert_eq!(location, "/foo/src/");
+}
+
+#[tokio::test]
 async fn empty_directory_without_index() {
     let svc = ServeDir::new(".").append_index_html_on_directories(false);
 
@@ -1115,6 +1157,44 @@ fn test_build_and_validate_path_reserved_dos_names() {
             assert!(result.is_some(), "Expected Some for path: {}", path);
         }
     }
+}
+
+// Regression test for the Windows directory-traversal fix in #204 (tracked by #251):
+// a drive-letter prefix such as `C:` must not be served as an absolute path.
+#[tokio::test]
+async fn reject_windows_drive_prefixed_path() {
+    let svc = ServeDir::new(TEST_FILES_DIR);
+
+    let req = Request::builder()
+        .uri("/C:/windows/win.ini")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "drive-prefixed path should be rejected, not served"
+    );
+}
+
+// As above, but with the `:` percent-encoded (`%3A`) to confirm the drive prefix
+// is still rejected *after* URL decoding.
+#[tokio::test]
+async fn reject_percent_encoded_windows_drive_prefixed_path() {
+    let svc = ServeDir::new(TEST_FILES_DIR);
+
+    let req = Request::builder()
+        .uri("/anypath/c%3A/windows/win.ini")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "percent-encoded drive prefix should be rejected after decoding"
+    );
 }
 
 // Regression test for https://github.com/tower-rs/tower-http/issues/664
