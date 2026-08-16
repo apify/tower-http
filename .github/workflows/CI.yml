@@ -45,7 +45,7 @@ jobs:
     - uses: Swatinem/rust-cache@v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
-    - uses: taiki-e/install-action@v2.85.4
+    - uses: taiki-e/install-action@v2.85.12
       with:
         tool: cargo-hack
     - name: cargo hack check
@@ -118,7 +118,7 @@ jobs:
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Install cargo-hack
-      uses: taiki-e/install-action@v2.85.4
+      uses: taiki-e/install-action@v2.85.12
       with:
         tool: cargo-hack
     - name: Check with minimal versions
@@ -140,7 +140,7 @@ jobs:
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Install cargo-semver-checks
-      uses: taiki-e/install-action@v2.85.4
+      uses: taiki-e/install-action@v2.85.12
       with:
         tool: cargo-semver-checks
     - name: Check semver compatibility
@@ -203,11 +203,11 @@ jobs:
     - uses: actions/checkout@v7
     - uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: nightly-2025-10-18
+        toolchain: nightly-2026-03-20
     - name: Install cargo-check-external-types
       uses: taiki-e/cache-cargo-install-action@v3
       with:
-        tool: cargo-check-external-types@0.4.0
+        tool: cargo-check-external-types@0.5.0
     - uses: Swatinem/rust-cache@v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
