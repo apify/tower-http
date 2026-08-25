@@ -57,6 +57,7 @@ pub struct ServeDir<F = DefaultServeDirFallback, B = TokioBackend> {
     base: PathBuf,
     redirect_path_prefix: String,
     buf_chunk_size: usize,
+    ignore_multi_range_requests: bool,
     precompressed_variants: Option<PrecompressedVariants>,
     // This is used to specialize implementation for
     // single files
@@ -79,9 +80,11 @@ impl ServeDir<DefaultServeDirFallback> {
             base,
             redirect_path_prefix: String::new(),
             buf_chunk_size: DEFAULT_CAPACITY,
+            ignore_multi_range_requests: false,
             precompressed_variants: None,
             variant: ServeVariant::Directory {
                 append_index_html_on_directories: true,
+                redirect_to_trailing_slash: true,
                 html_as_default_extension: false,
             },
             fallback: None,
@@ -98,6 +101,7 @@ impl ServeDir<DefaultServeDirFallback> {
             base: path.as_ref().to_owned(),
             redirect_path_prefix: String::new(),
             buf_chunk_size: DEFAULT_CAPACITY,
+            ignore_multi_range_requests: false,
             precompressed_variants: None,
             variant: ServeVariant::SingleFile { mime },
             fallback: None,
@@ -121,9 +125,11 @@ impl<B: Backend> ServeDir<DefaultServeDirFallback, B> {
         ServeDir {
             base,
             buf_chunk_size: DEFAULT_CAPACITY,
+            ignore_multi_range_requests: false,
             precompressed_variants: None,
             variant: ServeVariant::Directory {
                 append_index_html_on_directories: true,
+                redirect_to_trailing_slash: true,
                 html_as_default_extension: false,
             },
             fallback: None,
@@ -147,6 +153,26 @@ impl<F, B: Backend> ServeDir<F, B> {
                 ..
             } => {
                 *append_index_html_on_directories = append;
+                self
+            }
+            ServeVariant::SingleFile { mime: _ } => self,
+        }
+    }
+
+    /// Whether to redirect directory requests without a trailing slash.
+    ///
+    /// When enabled, a request to `/dir` redirects to `/dir/`. When disabled,
+    /// `/dir/index.html` is served directly at `/dir` if
+    /// [`append_index_html_on_directories`](Self::append_index_html_on_directories) is enabled.
+    ///
+    /// Defaults to `true`.
+    pub fn redirect_to_trailing_slash(mut self, redirect: bool) -> Self {
+        match &mut self.variant {
+            ServeVariant::Directory {
+                redirect_to_trailing_slash,
+                ..
+            } => {
+                *redirect_to_trailing_slash = redirect;
                 self
             }
             ServeVariant::SingleFile { mime: _ } => self,
@@ -187,6 +213,20 @@ impl<F, B: Backend> ServeDir<F, B> {
     /// The default capacity is 64kb.
     pub fn with_buf_chunk_size(mut self, chunk_size: usize) -> Self {
         self.buf_chunk_size = chunk_size;
+        self
+    }
+
+    /// Configure whether syntactically valid multi-range requests should be ignored.
+    ///
+    /// When enabled, a request containing multiple byte ranges is served as a normal full
+    /// response with status `200 OK`, as if the `Range` header were absent. This check happens
+    /// before semantic range validation, so overlapping, reversed, or otherwise unsatisfiable
+    /// multi-range requests are also ignored. Malformed range headers and unsatisfiable
+    /// single-range requests still result in `416 Range Not Satisfiable`.
+    ///
+    /// Defaults to `false`.
+    pub fn ignore_multi_range_requests(mut self, ignore: bool) -> Self {
+        self.ignore_multi_range_requests = ignore;
         self
     }
 
@@ -281,6 +321,7 @@ impl<F, B: Backend> ServeDir<F, B> {
             redirect_path_prefix: self.redirect_path_prefix,
             base: self.base,
             buf_chunk_size: self.buf_chunk_size,
+            ignore_multi_range_requests: self.ignore_multi_range_requests,
             precompressed_variants: self.precompressed_variants,
             variant: self.variant,
             fallback: Some(new_fallback),
@@ -446,6 +487,7 @@ impl<F, B: Backend> ServeDir<F, B> {
         let redirect_path_prefix = self.redirect_path_prefix.clone();
 
         let buf_chunk_size = self.buf_chunk_size;
+        let ignore_multi_range_requests = self.ignore_multi_range_requests;
         let range_header = req
             .headers()
             .get(header::RANGE)
@@ -467,6 +509,7 @@ impl<F, B: Backend> ServeDir<F, B> {
             negotiated_encodings,
             range_header,
             buf_chunk_size,
+            ignore_multi_range_requests,
             precompression_configured,
             backend: self.backend.clone(),
         }));
@@ -553,6 +596,7 @@ opaque_future! {
 enum ServeVariant {
     Directory {
         append_index_html_on_directories: bool,
+        redirect_to_trailing_slash: bool,
         html_as_default_extension: bool,
     },
     SingleFile {
@@ -565,6 +609,7 @@ impl ServeVariant {
         match self {
             ServeVariant::Directory {
                 append_index_html_on_directories: _,
+                redirect_to_trailing_slash: _,
                 html_as_default_extension: _,
             } => {
                 let path = requested_path.trim_start_matches('/');
